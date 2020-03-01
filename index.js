@@ -1,13 +1,8 @@
 const request = require("request");
 const sdk = require("matrix-bot-sdk");
 const he = require("he");
-const Gpio =
-  process.env.NODE_ENV !== "production"
-    ? require("pigpio-mock")
-    : require("pigpio");
-
-const motorLeft = new Gpio.Gpio(10, { mode: Gpio.OUTPUT });
-const motorRight = new Gpio.Gpio(11, { mode: Gpio.OUTPUT });
+const pimotor = require("./motor.js");
+const piled = require("./led.js");
 
 const MatrixClient = sdk.MatrixClient;
 const SimpleFsStorageProvider = sdk.SimpleFsStorageProvider;
@@ -24,6 +19,11 @@ const client = new MatrixClient(homeserverUrl, accessToken, storage);
 
 AutojoinRoomsMixin.setupOnClient(client);
 
+function stopMotor() {
+  pimotor.left.stop();
+  pimotor.right.stop();
+}
+
 client.start().then(() => console.log("Client started!"));
 
 client.on("room.message", (roomId, event) => {
@@ -36,26 +36,55 @@ client.on("room.message", (roomId, event) => {
     sendCommandPoll(roomId);
   }
 
+  if (body.startsWith("!kitt")) {
+    doKnightRider();
+  }
+
+  if (body.startsWith("!led")) {
+    const expression = body.substring("!led".length).trim();
+    switch (expression) {
+      case "1":
+        piled.one.toggle();
+        break;
+      case "2":
+        piled.two.toggle();
+        break;
+      case "3":
+        piled.three.toggle();
+        break;
+      case "4":
+        piled.four.toggle();
+        break;
+    }
+  }
+
   if (body.startsWith("cmd_")) {
     const expression = body.substring("cmd_".length).trim();
 
-    let pulseWidth = 1000;
+    var timeout = 2000;
 
     switch (expression) {
-      case "right":
-        motorLeft.servoWrite(pulseWidth);
-        break;
       case "left":
-        motorRight.servoWrite(pulseWidth);
+        pimotor.right.forward();
+        pimotor.left.forward();
+        timeout = 500;
+        break;
+      case "right":
+        pimotor.right.backward();
+        pimotor.left.backward();
+        timeout = 500;
         break;
       case "back":
-        motorLeft.servoWrite(pulseWidth);
+        pimotor.right.forward();
+        pimotor.left.backward();
         break;
       case "ahead":
-        motorRight.servoWrite(pulseWidth);
-        motorLeft.servoWrite(pulseWidth);
+        pimotor.left.forward();
+        pimotor.right.backward();
         break;
     }
+
+    setTimeout(stopMotor, timeout);
 
     client.sendMessage(roomId, {
       msgtype: "m.notice",
@@ -69,6 +98,17 @@ client.on("room.message", (roomId, event) => {
     sendWebcamImage(roomId, "https://livespotting.com/snapshots/LS_10vJe.jpg");
   }
 });
+
+function doKnightRider() {
+  setTimeout(() => piled.one.on(), 10);
+  setTimeout(() => piled.two.on(), 200);
+  setTimeout(() => piled.three.on(), 400);
+  setTimeout(() => piled.four.on(), 600);
+  setTimeout(() => piled.one.off(), 800);
+  setTimeout(() => piled.two.off(), 1000);
+  setTimeout(() => piled.three.off(), 1200);
+  setTimeout(() => piled.four.off(), 1400);
+}
 
 function sendCommandPoll(roomId) {
   const question = "Nächstes Kommando?";
@@ -137,3 +177,27 @@ function sendWebcamImage(roomId, url) {
     console.log(error);
   }
 }
+
+function motor(pin1, pin2) {
+  this.pin1 = pin1;
+  this.pin2 = pin2;
+  this.reverse = false;
+
+  rpio.open(pin1, rpio.OUTPUT, rpio.LOW);
+  rpio.open(pin2, rpio.OUTPUT, rpio.LOW);
+}
+
+motor.prototype.forward = function() {
+  rpio.write(this.pin1, !this.reverse ? rpio.HIGH : rpio.LOW);
+  rpio.write(this.pin2, this.reverse ? rpio.HIGH : rpio.LOW);
+};
+
+motor.prototype.backward = function() {
+  rpio.write(this.pin1, this.reverse ? rpio.HIGH : rpio.LOW);
+  rpio.write(this.pin2, !this.reverse ? rpio.HIGH : rpio.LOW);
+};
+
+motor.prototype.stop = function() {
+  rpio.write(this.pin1, rpio.LOW);
+  rpio.write(this.pin2, rpio.LOW);
+};
