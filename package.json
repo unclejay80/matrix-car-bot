@@ -1,0 +1,21 @@
+{
+  "name": "matrix-js-question-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "matrix-bot-sdk": "^0.5.2",
+    "request": "^2.88.2",
+    "he": "^1.2.0",
+    "pigpio": "^3.0.0",
+    "pigpio-mock": "^0.0.1"
+  },
+  "devDependencies": {
+    "pigpio-mock": "^0.0.1"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
