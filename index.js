@@ -1,8 +1,14 @@
+
+
 const request = require("request");
 const sdk = require("matrix-bot-sdk");
 const he = require("he");
+const PiCamera = require("pi-camera")
+const fs = require('fs');
+
 const pimotor = require("./motor.js");
 const piled = require("./led.js");
+const pianalog = require("./analog.js");
 
 const MatrixClient = sdk.MatrixClient;
 const SimpleFsStorageProvider = sdk.SimpleFsStorageProvider;
@@ -13,9 +19,30 @@ const accessToken = process.env.TOKEN;
 
 let intervalMap = new Map();
 
+const myCamera = new PiCamera({
+  mode: 'photo',
+  output: `${ __dirname }/test.jpg`,
+  width: 640,
+  height: 480,
+  nopreview: true,
+  vflip: true,
+  hflip: true
+});
+
 const storage = new SimpleFsStorageProvider("bot.json");
 
 const client = new MatrixClient(homeserverUrl, accessToken, storage);
+
+
+pianalog.test();
+
+setTimeout(() => {
+  pianalog.read(1, true, 100, function(error, channel, result){
+    console.log(result)
+  });
+  
+}, 1000);
+
 
 AutojoinRoomsMixin.setupOnClient(client);
 
@@ -24,7 +51,13 @@ function stopMotor() {
   pimotor.right.stop();
 }
 
-client.start().then(() => console.log("Client started!"));
+
+
+setTimeout((() => { 
+  client.start().then(() => console.log("Client started!"))
+  
+  }).bind(this), 500);
+
 
 client.on("room.message", (roomId, event) => {
   if (!event["content"]) return;
@@ -95,7 +128,10 @@ client.on("room.message", (roomId, event) => {
   }
 
   if (body.startsWith("!cam")) {
-    sendWebcamImage(roomId, "https://livespotting.com/snapshots/LS_10vJe.jpg");
+    sendPiCameraImage(roomId);
+
+
+
   }
 });
 
@@ -155,13 +191,16 @@ function doMath(roomId, event, expression) {
   });
 }
 
-function sendWebcamImage(roomId, url) {
-  try {
-    request(url, { encoding: null }, (err, res, body) => {
-      if (err) {
-        return console.log(err);
-      }
-      client.uploadContent(body, "image/jpeg", "test.jpg").then(mxcUri => {
+
+
+
+function sendPiCameraImage(roomId) {
+
+
+    myCamera.snap()
+    .then((result) => {
+      var data = fs.readFileSync(`${ __dirname }/test.jpg`);
+      client.uploadContent(data, "image/jpeg", "test.jpg").then(mxcUri => {
         client
           .sendMessage(roomId, {
             msgtype: "m.image",
@@ -172,32 +211,10 @@ function sendWebcamImage(roomId, url) {
             console.log("caught", err.message);
           });
       });
+    })
+    .catch((error) => {
+      console.log(error);
     });
-  } catch (error) {
-    console.log(error);
-  }
+
 }
 
-function motor(pin1, pin2) {
-  this.pin1 = pin1;
-  this.pin2 = pin2;
-  this.reverse = false;
-
-  rpio.open(pin1, rpio.OUTPUT, rpio.LOW);
-  rpio.open(pin2, rpio.OUTPUT, rpio.LOW);
-}
-
-motor.prototype.forward = function() {
-  rpio.write(this.pin1, !this.reverse ? rpio.HIGH : rpio.LOW);
-  rpio.write(this.pin2, this.reverse ? rpio.HIGH : rpio.LOW);
-};
-
-motor.prototype.backward = function() {
-  rpio.write(this.pin1, this.reverse ? rpio.HIGH : rpio.LOW);
-  rpio.write(this.pin2, !this.reverse ? rpio.HIGH : rpio.LOW);
-};
-
-motor.prototype.stop = function() {
-  rpio.write(this.pin1, rpio.LOW);
-  rpio.write(this.pin2, rpio.LOW);
-};
