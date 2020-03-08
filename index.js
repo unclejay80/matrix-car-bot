@@ -6,6 +6,7 @@ const he = require("he");
 const PiCamera = require("pi-camera")
 const fs = require('fs');
 const raspi = require('raspi');
+const { exec } = require("child_process");
 var CircularBuffer = require("circular-buffer");
 
 const pimotor = require("./motor.js");
@@ -38,6 +39,7 @@ const client = new MatrixClient(homeserverUrl, accessToken, storage);
 
 
 
+
 AutojoinRoomsMixin.setupOnClient(client);
 
 initButtonSubscriber();
@@ -45,7 +47,14 @@ initButtonSubscriber();
 
 
 setTimeout((() => { 
-  client.start().then(() => console.log("Client started!"))
+  client.start().then(() => {
+    console.log("Client started!");
+    client.getJoinedRooms().then( rooms => {
+      rooms.forEach( room => {
+        sendTextMessage(room, "Hello I'm in :)");
+      });
+    });
+  });
   
 }).bind(this), 500);
 
@@ -73,6 +82,9 @@ client.on("room.message", (roomId, event) => {
     doKnightRider();
   }
   
+  if (body.startsWith("!bt")) {
+    doBTScan(roomId);
+  }
 
   if (body.startsWith("!led")) {
     const expression = body.substring("!led".length).trim();
@@ -99,26 +111,12 @@ client.on("room.message", (roomId, event) => {
 
     switch (expression) {
       case "left":
-        pimotor.right.forward();
-        pimotor.left.forward();
-        timeout = 500;
-        break;
       case "right":
-        pimotor.right.backward();
-        pimotor.left.backward();
         timeout = 500;
-        break;
-      case "back":
-        pimotor.right.forward();
-        pimotor.left.backward();
-        break;
-      case "ahead":
-        pimotor.left.forward();
-        pimotor.right.backward();
         break;
     }
 
-    setTimeout(stopMotor, timeout);
+    driveMotor(expression, timeout)
 
     client.sendMessage(roomId, {
       msgtype: "m.notice",
@@ -128,11 +126,12 @@ client.on("room.message", (roomId, event) => {
     sendCommandPoll(roomId);
   }
 
+  if (body.startsWith("!breakdance")) {
+    doMotorBreakdance();
+  }
+
   if (body.startsWith("!cam")) {
     sendPiCameraImage(roomId);
-
-
-
   }
 });
 
@@ -239,17 +238,80 @@ function stopMotor() {
   pimotor.right.stop();
 }
 
+function driveMotor(command, time) {
+
+  console.log("drivemotor " + command + " " + time)
+
+  switch (command) {
+    case "left":
+      pimotor.right.forward();
+      pimotor.left.forward();
+      break;
+    case "right":
+      pimotor.right.backward();
+      pimotor.left.backward();
+      break;
+    case "back":
+      pimotor.right.forward();
+      pimotor.left.backward();
+      break;
+    case "ahead":
+      pimotor.left.forward();
+      pimotor.right.backward();
+      break;
+  }
+
+  setTimeout(stopMotor, time);
+}
+
+
+function doBTScan(roomId) {
+  sendTextMessage(roomId, "Starting BT Scan...");
+
+  exec("hcitool scan", (error, stdout, stderr) => {
+    if (error) {
+        console.log(`error: ${error.message}`);
+        return;
+    }
+    if (stderr) {
+        console.log(`stderr: ${stderr}`);
+        return;
+    }
+    console.log(`stdout: ${stdout}`);
+
+    var lines = stdout.split(/\r?\n/);
+    if( lines.length > 2) {
+      lines.shift();
+      lines.pop();
+      lines.forEach( line => {
+        sendTextMessage( roomId, "BT found: " + line.trim());
+      });
+  
+    } else {
+      sendTextMessage( roomId, "no BT device found");
+    }
+
+  });
+
+
+}
+
 function initButtonSubscriber() {
 
   raspi.init(() => {
     console.log("raspi init")
   
-    let prevButtons = [];
+    var prevButtons = [];
+    var timer = 0;
   
     pibutton.getTouch(true, 100, function(buttons) {
       console.log( buttons);
+      clearTimeout(timer);
   
       if( arraysIdentical(prevButtons, buttons)) {
+        timer = setTimeout(() => {
+          prevButtons = [];
+        }, 2000)
         return;
       }
   
@@ -278,3 +340,26 @@ function arraysIdentical(a, b) {
   }
   return true;
 };
+
+function sendTextMessage(roomId, text) {
+  client
+  .sendMessage(roomId, {
+    msgtype: "m.text",
+    body: text,
+  })
+  .catch(err => {
+    console.log("caught", err.message);
+  });
+}
+
+function doMotorBreakdance() {
+  setTimeout( () => driveMotor("ahead", 1000), 0);
+  setTimeout( () => driveMotor("back", 1000), 2000);
+  setTimeout( () => driveMotor("left", 500), 5000);
+  setTimeout( () => driveMotor("ahead", 1000), 7000);
+  setTimeout( () => driveMotor("back", 1000), 9000);
+  setTimeout( () => driveMotor("right", 500), 11000);
+  setTimeout( () => driveMotor("ahead", 1000), 13000);
+  setTimeout( () => driveMotor("back", 1000), 15000);
+
+}
