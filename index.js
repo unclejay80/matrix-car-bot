@@ -5,10 +5,12 @@ const sdk = require("matrix-bot-sdk");
 const he = require("he");
 const PiCamera = require("pi-camera")
 const fs = require('fs');
+const raspi = require('raspi');
+var CircularBuffer = require("circular-buffer");
 
 const pimotor = require("./motor.js");
 const piled = require("./led.js");
-const pianalog = require("./analog.js");
+const pibutton = require("./button.js");
 
 const MatrixClient = sdk.MatrixClient;
 const SimpleFsStorageProvider = sdk.SimpleFsStorageProvider;
@@ -18,6 +20,7 @@ const homeserverUrl = "https://matrix.org"; // make sure to update this with you
 const accessToken = process.env.TOKEN;
 
 let intervalMap = new Map();
+let buttonSubscriberRooms = [];
 
 const myCamera = new PiCamera({
   mode: 'photo',
@@ -34,36 +37,33 @@ const storage = new SimpleFsStorageProvider("bot.json");
 const client = new MatrixClient(homeserverUrl, accessToken, storage);
 
 
-pianalog.test();
-
-setTimeout(() => {
-  pianalog.read(1, true, 100, function(error, channel, result){
-    console.log(result)
-  });
-  
-}, 1000);
-
 
 AutojoinRoomsMixin.setupOnClient(client);
 
-function stopMotor() {
-  pimotor.left.stop();
-  pimotor.right.stop();
-}
+initButtonSubscriber();
 
 
 
 setTimeout((() => { 
   client.start().then(() => console.log("Client started!"))
   
-  }).bind(this), 500);
+}).bind(this), 500);
 
+
+client.on("room.join", (roomId, joinEvent) => {
+  console.log(`Joined ${roomId} as ${joinEvent["state_key"]}`);
+});
 
 client.on("room.message", (roomId, event) => {
   if (!event["content"]) return;
   const sender = event["sender"];
   const body = event["content"]["body"];
   console.log(`${roomId}: ${sender} says '${body}`);
+
+  //add each room to button subscribers
+  if( !buttonSubscriberRooms.includes(roomId)) {
+    buttonSubscriberRooms.push(roomId);
+  }
 
   if (body.startsWith("!command")) {
     sendCommandPoll(roomId);
@@ -72,6 +72,7 @@ client.on("room.message", (roomId, event) => {
   if (body.startsWith("!kitt")) {
     doKnightRider();
   }
+  
 
   if (body.startsWith("!led")) {
     const expression = body.substring("!led".length).trim();
@@ -136,14 +137,17 @@ client.on("room.message", (roomId, event) => {
 });
 
 function doKnightRider() {
-  setTimeout(() => piled.one.on(), 10);
-  setTimeout(() => piled.two.on(), 200);
-  setTimeout(() => piled.three.on(), 400);
-  setTimeout(() => piled.four.on(), 600);
-  setTimeout(() => piled.one.off(), 800);
-  setTimeout(() => piled.two.off(), 1000);
-  setTimeout(() => piled.three.off(), 1200);
-  setTimeout(() => piled.four.off(), 1400);
+  for( var i = 0; i < 4; i++) {
+    offset = i * 1400;
+    setTimeout(() => piled.one.on(), 10 + offset);
+    setTimeout(() => piled.two.on(), 200 + offset);
+    setTimeout(() => piled.three.on(), 400 + offset);
+    setTimeout(() => piled.four.on(), 600 + offset);
+    setTimeout(() => piled.one.off(), 800 + offset);
+    setTimeout(() => piled.two.off(), 1000 + offset);
+    setTimeout(() => piled.three.off(), 1200 + offset);
+    setTimeout(() => piled.four.off(), 1400 + offset);
+  }
 }
 
 function sendCommandPoll(roomId) {
@@ -192,6 +196,17 @@ function doMath(roomId, event, expression) {
 }
 
 
+function sendButtonMsg(button, roomId) {
+  client
+  .sendMessage(roomId, {
+    msgtype: "m.text",
+    body: "Button pressed: " + button,
+  })
+  .catch(err => {
+    console.log("caught", err.message);
+  });
+
+}
 
 
 function sendPiCameraImage(roomId) {
@@ -218,3 +233,48 @@ function sendPiCameraImage(roomId) {
 
 }
 
+
+function stopMotor() {
+  pimotor.left.stop();
+  pimotor.right.stop();
+}
+
+function initButtonSubscriber() {
+
+  raspi.init(() => {
+    console.log("raspi init")
+  
+    let prevButtons = [];
+  
+    pibutton.getTouch(true, 100, function(buttons) {
+      console.log( buttons);
+  
+      if( arraysIdentical(prevButtons, buttons)) {
+        return;
+      }
+  
+      prevButtons = buttons;
+  
+      buttonSubscriberRooms.forEach(room => {
+        buttons.forEach(button => {
+          sendButtonMsg(button - 4, room);
+        });
+        
+      });
+    });
+    
+  });
+  
+
+
+}
+
+
+function arraysIdentical(a, b) {
+  var i = a.length;
+  if (i != b.length) return false;
+  while (i--) {
+      if (a[i] !== b[i]) return false;
+  }
+  return true;
+};
